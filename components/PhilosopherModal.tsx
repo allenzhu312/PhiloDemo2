@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Philosopher, Comment, ChatMessage } from '../types';
-import { X, MessageCircle, Send, User, Quote, Sparkles } from 'lucide-react';
-import { streamPhilosopherChat } from '../services/geminiService';
+// components/PhilosopherModal.tsx
+import React, { useState, useEffect, useRef } from "react";
+import { Philosopher, ChatMessage } from "../types";
+import { X, MessageCircle, Send, User, Quote, Sparkles } from "lucide-react";
+import { streamPhilosopherChat } from "../services/geminiService";
 
 interface PhilosopherModalProps {
   philosopher: Philosopher;
@@ -10,59 +11,77 @@ interface PhilosopherModalProps {
 }
 
 enum Tab {
-  BIO = 'BIO',
-  CHAT = 'CHAT',
-  COMMENTS = 'COMMENTS'
+  BIO = "BIO",
+  CHAT = "CHAT",
+  COMMENTS = "COMMENTS",
 }
 
-const PhilosopherModal: React.FC<PhilosopherModalProps> = ({ philosopher, onClose, onAddComment }) => {
+const PhilosopherModal: React.FC<PhilosopherModalProps> = ({
+  philosopher,
+  onClose,
+  onAddComment,
+}) => {
   const [activeTab, setActiveTab] = useState<Tab>(Tab.BIO);
-  
-  // Chat State
+
+  // Chat state
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
-  const [chatInput, setChatInput] = useState('');
+  const [chatInput, setChatInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
-  const chatEndRef = useRef<HTMLDivElement>(null);
+  const chatEndRef = useRef<HTMLDivElement | null>(null);
 
-  // Comment State
-  const [newComment, setNewComment] = useState('');
-  const [authorName, setAuthorName] = useState('');
+  // Comment state
+  const [newComment, setNewComment] = useState("");
+  const [authorName, setAuthorName] = useState("");
 
-  // Auto-scroll chat
+  // 自动滚动到底部
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (chatEndRef.current && activeTab === Tab.CHAT) {
+      chatEndRef.current.scrollIntoView({ behavior: "smooth" });
+    }
   }, [chatHistory, activeTab]);
 
   const handleSendMessage = async () => {
-    if (!chatInput.trim()) return;
+    if (!chatInput.trim() || isTyping) return;
 
-    const userMsg: ChatMessage = { role: 'user', content: chatInput };
-    setChatHistory(prev => [...prev, userMsg]);
-    setChatInput('');
+    const userMsg: ChatMessage = { role: "user", content: chatInput };
+    const historyBefore = [...chatHistory, userMsg];
+
+    setChatHistory(historyBefore);
+    setChatInput("");
     setIsTyping(true);
 
     try {
-      // Convert internal ChatMessage to the format service expects if needed, or just pass history
       const stream = streamPhilosopherChat(
-        philosopher.name, 
-        chatHistory.map(m => ({ role: m.role, content: m.content })), 
+        philosopher.name,
+        historyBefore.map((m) => ({ role: m.role, content: m.content })),
         userMsg.content
       );
 
-      let fullResponse = '';
-      setChatHistory(prev => [...prev, { role: 'model', content: '' }]);
+      let fullResponse = "";
+      // 占位的 model 消息
+      setChatHistory((prev) => [...prev, { role: "model", content: "" }]);
 
       for await (const chunk of stream) {
         fullResponse += chunk;
-        setChatHistory(prev => {
-          const newHistory = [...prev];
-          newHistory[newHistory.length - 1].content = fullResponse;
-          return newHistory;
+        setChatHistory((prev) => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last && last.role === "model") {
+            last.content = fullResponse;
+          }
+          return updated;
         });
       }
     } catch (error) {
       console.error("Chat error", error);
-      setChatHistory(prev => [...prev, { role: 'model', content: "I am currently lost in deep contemplation and cannot respond. (API Error)" }]);
+      setChatHistory((prev) => [
+        ...prev,
+        {
+          role: "model",
+          content:
+            "我似乎陷入了过于深刻的思考之中，现在暂时无法回答（可能是 API Key 或网络出现了问题）。",
+        },
+      ]);
     } finally {
       setIsTyping(false);
     }
@@ -70,226 +89,285 @@ const PhilosopherModal: React.FC<PhilosopherModalProps> = ({ philosopher, onClos
 
   const handleCommentSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (newComment.trim() && authorName.trim()) {
-      onAddComment(philosopher.id, newComment, authorName);
-      setNewComment('');
-      // Keep author name for convenience
-    }
+    if (!newComment.trim() || !authorName.trim()) return;
+    onAddComment(philosopher.id, newComment, authorName);
+    setNewComment("");
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
-      <div 
-        className="absolute inset-0 bg-stone-900/60 backdrop-blur-sm transition-opacity" 
-        onClick={onClose}
-      ></div>
-      
-      <div className="relative bg-antique w-full max-w-5xl h-[90vh] rounded-2xl shadow-2xl overflow-hidden flex flex-col md:flex-row animate-fadeIn">
-        
-        {/* Left Panel: Image & Quick Stats */}
-        <div className="md:w-1/3 bg-stone-200/50 relative">
-            <div className="h-64 md:h-full w-full relative">
-                <img 
-                    src={philosopher.imageUrl} 
-                    alt={philosopher.name} 
-                    className="w-full h-full object-cover filter sepia-[0.3]"
-                />
-                <div className="absolute inset-0 bg-gradient-to-t from-stone-900/80 via-transparent to-transparent md:bg-gradient-to-r" />
-                
-                <div className="absolute bottom-0 left-0 p-6 text-white w-full">
-                    <h2 className="text-3xl font-serif font-bold mb-1">{philosopher.name}</h2>
-                    <p className="font-mono text-sm text-stone-300 mb-4">{philosopher.dates}</p>
-                    <div className="flex flex-wrap gap-2">
-                        {philosopher.keyIdeas.slice(0, 3).map((idea, idx) => (
-                            <span key={idx} className="bg-white/20 backdrop-blur px-2 py-1 rounded text-xs">
-                                {idea}
-                            </span>
-                        ))}
-                    </div>
-                </div>
-            </div>
-            <button 
-                onClick={onClose}
-                className="absolute top-4 right-4 md:hidden bg-black/20 text-white p-2 rounded-full backdrop-blur z-20"
-            >
-                <X size={20} />
-            </button>
-        </div>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 py-6">
+      <div className="relative max-h-[90vh] w-full max-w-5xl overflow-hidden rounded-3xl border border-[#e2c9a5] bg-[#fbf4e6] shadow-2xl">
+        {/* 关闭按钮 */}
+        <button
+          onClick={onClose}
+          className="absolute right-4 top-4 rounded-full bg-[#f5e6cf] p-1.5 text-[#6c4a3c] shadow-sm hover:bg-[#f0d6b4]"
+        >
+          <X className="h-4 w-4" />
+        </button>
 
-        {/* Right Panel: Content */}
-        <div className="md:w-2/3 flex flex-col bg-antique h-full">
-            {/* Header / Tabs */}
-            <div className="flex items-center justify-between border-b border-stone-300 px-6 py-4 bg-white/50">
-                <div className="flex space-x-6">
-                    <button 
-                        onClick={() => setActiveTab(Tab.BIO)}
-                        className={`pb-1 text-sm font-semibold tracking-wide transition-colors ${activeTab === Tab.BIO ? 'text-accent border-b-2 border-accent' : 'text-stone-500 hover:text-stone-800'}`}
-                    >
-                        BIOGRAPHY
-                    </button>
-                    <button 
-                        onClick={() => setActiveTab(Tab.CHAT)}
-                        className={`pb-1 text-sm font-semibold tracking-wide transition-colors flex items-center gap-1 ${activeTab === Tab.CHAT ? 'text-accent border-b-2 border-accent' : 'text-stone-500 hover:text-stone-800'}`}
-                    >
-                        <Sparkles size={14} /> CHAT WITH AI
-                    </button>
-                    <button 
-                        onClick={() => setActiveTab(Tab.COMMENTS)}
-                        className={`pb-1 text-sm font-semibold tracking-wide transition-colors flex items-center gap-1 ${activeTab === Tab.COMMENTS ? 'text-accent border-b-2 border-accent' : 'text-stone-500 hover:text-stone-800'}`}
-                    >
-                         COMMENTS ({philosopher.comments.length})
-                    </button>
-                </div>
-                <button onClick={onClose} className="hidden md:block text-stone-400 hover:text-ink transition-colors">
-                    <X size={24} />
+        <div className="grid gap-6 p-6 md:grid-cols-[minmax(0,1.2fr)_minmax(0,1.8fr)] md:p-8">
+          {/* 左侧：图片 & 基本信息 */}
+          <div className="space-y-5">
+            <div className="overflow-hidden rounded-2xl border border-[#e2c9a5] bg-[#fdf6e8]">
+              <img
+                src={philosopher.imageUrl}
+                alt={philosopher.name}
+                className="h-64 w-full object-cover"
+              />
+            </div>
+
+            <div className="space-y-2 rounded-2xl border border-[#e2c9a5] bg-[#fff7eb] px-4 py-3 text-sm text-[#6c4a3c]">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#b08a6f]">
+                {philosopher.school}
+              </p>
+              <h2 className="text-xl font-bold text-[#2b190f]">
+                {philosopher.name}
+              </h2>
+              <p className="text-xs text-[#8a674f]">{philosopher.dates}</p>
+            </div>
+
+            <div className="space-y-2 rounded-2xl border border-[#e2c9a5] bg-[#fffaf0] px-4 py-3">
+              <h3 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-[#b08a6f]">
+                <Sparkles className="h-4 w-4" />
+                Key Ideas
+              </h3>
+              <ul className="space-y-1 text-sm text-[#4a2b1a]">
+                {philosopher.keyIdeas.slice(0, 4).map((idea, idx) => (
+                  <li key={idx} className="flex gap-2">
+                    <span className="mt-[6px] h-1.5 w-1.5 rounded-full bg-[#c47f3b]" />
+                    <span>{idea}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+
+          {/* 右侧：Tab + 内容 */}
+          <div className="flex flex-col">
+            {/* Tabs */}
+            <div className="border-b border-[#e2c9a5] pb-2">
+              <div className="flex gap-4 text-xs font-semibold tracking-wide">
+                <button
+                  onClick={() => setActiveTab(Tab.BIO)}
+                  className={`pb-1 transition-colors ${
+                    activeTab === Tab.BIO
+                      ? "border-b-2 border-[#c47f3b] text-[#c47f3b]"
+                      : "text-[#8a674f] hover:text-[#c47f3b]"
+                  }`}
+                >
+                  BIOGRAPHY
                 </button>
+                <button
+                  onClick={() => setActiveTab(Tab.CHAT)}
+                  className={`flex items-center gap-1 pb-1 transition-colors ${
+                    activeTab === Tab.CHAT
+                      ? "border-b-2 border-[#c47f3b] text-[#c47f3b]"
+                      : "text-[#8a674f] hover:text-[#c47f3b]"
+                  }`}
+                >
+                  <MessageCircle className="h-3.5 w-3.5" />
+                  CHAT WITH AI
+                </button>
+                <button
+                  onClick={() => setActiveTab(Tab.COMMENTS)}
+                  className={`flex items-center gap-1 pb-1 transition-colors ${
+                    activeTab === Tab.COMMENTS
+                      ? "border-b-2 border-[#c47f3b] text-[#c47f3b]"
+                      : "text-[#8a674f] hover:text-[#c47f3b]"
+                  }`}
+                >
+                  COMMENTS ({philosopher.comments.length})
+                </button>
+              </div>
             </div>
 
-            {/* Scrollable Content Area */}
-            <div className="flex-grow overflow-y-auto p-6 md:p-8 custom-scrollbar">
-                
-                {activeTab === Tab.BIO && (
-                    <div className="space-y-8 animate-fadeIn">
-                        <div>
-                            <h3 className="text-xl font-bold font-serif text-ink mb-3 flex items-center gap-2">
-                                About
-                            </h3>
-                            <p className="text-stone-700 leading-relaxed text-lg font-serif">
-                                {philosopher.fullBio || philosopher.shortBio}
-                            </p>
-                        </div>
+            {/* 内容区域 */}
+            <div className="mt-4 flex-1 overflow-y-auto pr-1 text-sm leading-relaxed text-[#3b2418]">
+              {activeTab === Tab.BIO && (
+                <div className="space-y-4">
+                  <section>
+                    <h3 className="mb-1 text-xs font-semibold uppercase tracking-[0.16em] text-[#b08a6f]">
+                      About
+                    </h3>
+                    <p>
+                      {philosopher.fullBio || philosopher.shortBio}
+                    </p>
+                  </section>
 
-                        <div className="bg-stone-100 p-6 rounded-xl border border-stone-200">
-                            <h3 className="text-lg font-bold font-serif text-ink mb-4 flex items-center gap-2">
-                                <Quote size={18} className="text-accent" /> Famous Quotes
-                            </h3>
-                            <ul className="space-y-4">
-                                {philosopher.famousQuotes.map((quote, idx) => (
-                                    <li key={idx} className="italic text-stone-600 border-l-4 border-accent pl-4 py-1">
-                                        "{quote}"
-                                    </li>
-                                ))}
-                            </ul>
-                        </div>
+                  <section>
+                    <h3 className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-[#b08a6f]">
+                      <Quote className="h-4 w-4" />
+                      Famous Quotes
+                    </h3>
+                    <ul className="space-y-2">
+                      {philosopher.famousQuotes.map((quote, idx) => (
+                        <li
+                          key={idx}
+                          className="rounded-xl bg-[#fffaf0] px-3 py-2 text-sm italic text-[#4a2b1a]"
+                        >
+                          “{quote}”
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
+                </div>
+              )}
 
-                        <div>
-                            <h3 className="text-lg font-bold font-serif text-ink mb-3">Key Concepts</h3>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                {philosopher.keyIdeas.map((idea, idx) => (
-                                    <div key={idx} className="flex items-center gap-2 text-stone-700">
-                                        <div className="w-2 h-2 rounded-full bg-accent"></div>
-                                        {idea}
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-                    </div>
-                )}
+              {activeTab === Tab.CHAT && (
+                <div className="flex h-full flex-col">
+                  <div className="mb-3 rounded-xl bg-[#fff7eb] px-3 py-2 text-xs text-[#6c4a3c]">
+                    和一个模拟的「{philosopher.name}」聊天。
+                    可以问人生、伦理、存在、政治、科学等任何问题。
+                    <br />
+                    <span className="text-[11px] opacity-80">
+                      * AI 生成内容可能不完全符合历史事实，仅供学习与思考参考。
+                    </span>
+                  </div>
 
-                {activeTab === Tab.CHAT && (
-                    <div className="flex flex-col h-full animate-fadeIn">
-                        <div className="flex-grow space-y-4 mb-4">
-                            {chatHistory.length === 0 && (
-                                <div className="text-center text-stone-500 py-12">
-                                    <Sparkles className="mx-auto mb-2 text-accent" size={32} />
-                                    <p>Start a conversation with a simulated {philosopher.name}.</p>
-                                    <p className="text-sm opacity-70">Ask about their views on life, ethics, or existence.</p>
-                                </div>
-                            )}
-                            {chatHistory.map((msg, idx) => (
-                                <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                                    <div className={`max-w-[85%] rounded-2xl px-4 py-3 shadow-sm ${
-                                        msg.role === 'user' 
-                                        ? 'bg-accent text-white rounded-br-none' 
-                                        : 'bg-white text-stone-800 border border-stone-200 rounded-bl-none'
-                                    }`}>
-                                        <p className="text-sm md:text-base leading-relaxed whitespace-pre-wrap">{msg.content}</p>
-                                    </div>
-                                </div>
-                            ))}
-                            <div ref={chatEndRef} />
-                        </div>
-                        
-                        <div className="mt-auto pt-4 border-t border-stone-200">
-                            <div className="relative">
-                                <input
-                                    type="text"
-                                    value={chatInput}
-                                    onChange={(e) => setChatInput(e.target.value)}
-                                    onKeyDown={(e) => e.key === 'Enter' && !isTyping && handleSendMessage()}
-                                    placeholder={isTyping ? "Philosopher is thinking..." : "Ask a philosophical question..."}
-                                    disabled={isTyping}
-                                    className="w-full bg-white border border-stone-300 rounded-full py-3 pl-4 pr-12 focus:ring-2 focus:ring-accent focus:border-accent focus:outline-none transition-all"
-                                />
-                                <button
-                                    onClick={handleSendMessage}
-                                    disabled={isTyping || !chatInput.trim()}
-                                    className="absolute right-2 top-2 p-1.5 bg-ink text-white rounded-full hover:bg-accent disabled:opacity-50 transition-colors"
-                                >
-                                    <Send size={18} />
-                                </button>
-                            </div>
-                            <p className="text-xs text-center text-stone-400 mt-2">AI-generated responses may not be historically accurate.</p>
-                        </div>
-                    </div>
-                )}
+                  <div className="flex-1 space-y-2 overflow-y-auto rounded-xl bg-[#fffaf0] p-3">
+                    {chatHistory.length === 0 && (
+                      <p className="text-xs text-[#8a674f]">
+                        先发一条消息试试：
+                        「你如何看待幸福？」或者「用高中生能听懂的话解释一下你的核心思想」。
+                      </p>
+                    )}
 
-                {activeTab === Tab.COMMENTS && (
-                    <div className="h-full flex flex-col animate-fadeIn">
-                        <div className="flex-grow space-y-6 mb-6">
-                            {philosopher.comments.length === 0 ? (
-                                <div className="text-center text-stone-400 py-10">
-                                    <MessageCircle className="mx-auto mb-2 opacity-50" size={32} />
-                                    <p>No comments yet. Be the first to share your thoughts!</p>
-                                </div>
+                    {chatHistory.map((msg, idx) => (
+                      <div
+                        key={idx}
+                        className={`flex ${
+                          msg.role === "user"
+                            ? "justify-end"
+                            : "justify-start"
+                        }`}
+                      >
+                        <div
+                          className={`max-w-[80%] rounded-2xl px-3 py-2 text-sm ${
+                            msg.role === "user"
+                              ? "bg-[#f3e0c3] text-[#2b190f]"
+                              : "bg-white/90 text-[#3b2418]"
+                          }`}
+                        >
+                          <div className="mb-0.5 flex items-center gap-1 text-[11px] font-medium text-[#8a674f]">
+                            {msg.role === "user" ? (
+                              <>
+                                <User className="h-3 w-3" />
+                                你
+                              </>
                             ) : (
-                                philosopher.comments.map((comment) => (
-                                    <div key={comment.id} className="bg-white p-4 rounded-lg border border-stone-200 shadow-sm">
-                                        <div className="flex items-center gap-2 mb-2">
-                                            <div className="bg-stone-200 p-1.5 rounded-full">
-                                                <User size={14} className="text-stone-500" />
-                                            </div>
-                                            <span className="font-bold text-stone-800 text-sm">{comment.author}</span>
-                                            <span className="text-xs text-stone-400">
-                                                {new Date(comment.timestamp).toLocaleDateString()}
-                                            </span>
-                                        </div>
-                                        <p className="text-stone-700 text-sm">{comment.text}</p>
-                                    </div>
-                                ))
+                              <>
+                                <Sparkles className="h-3 w-3" />
+                                {philosopher.name}
+                              </>
                             )}
+                          </div>
+                          <div className="whitespace-pre-wrap">
+                            {msg.content}
+                          </div>
                         </div>
+                      </div>
+                    ))}
 
-                        <form onSubmit={handleCommentSubmit} className="bg-stone-100 p-4 rounded-xl border border-stone-200">
-                            <h4 className="text-sm font-bold text-stone-600 mb-3">Add a Comment</h4>
-                            <div className="space-y-3">
-                                <input 
-                                    type="text" 
-                                    placeholder="Your Name" 
-                                    className="w-full p-2 rounded border border-stone-300 text-sm focus:outline-none focus:border-accent"
-                                    value={authorName}
-                                    onChange={e => setAuthorName(e.target.value)}
-                                    required
-                                />
-                                <textarea 
-                                    placeholder="Share your insights..." 
-                                    className="w-full p-2 rounded border border-stone-300 text-sm focus:outline-none focus:border-accent min-h-[80px]"
-                                    value={newComment}
-                                    onChange={e => setNewComment(e.target.value)}
-                                    required
-                                />
-                                <button 
-                                    type="submit" 
-                                    className="w-full bg-ink text-white py-2 rounded font-medium hover:bg-accent transition-colors text-sm"
-                                >
-                                    Post Comment
-                                </button>
-                            </div>
-                        </form>
+                    {isTyping && (
+                      <div className="mt-2 text-xs text-[#8a674f]">
+                        {philosopher.name} 正在思考…
+                      </div>
+                    )}
+
+                    <div ref={chatEndRef} />
+                  </div>
+
+                  {/* 输入框 */}
+                  <div className="mt-3 flex items-center gap-2">
+                    <div className="relative flex-1">
+                      <input
+                        value={chatInput}
+                        onChange={(e) => setChatInput(e.target.value)}
+                        onKeyDown={(e) =>
+                          e.key === "Enter" && !isTyping && handleSendMessage()
+                        }
+                        placeholder={
+                          isTyping
+                            ? "哲学家正在思考..."
+                            : "问一个哲学问题，比如：什么是有意义的人生？"
+                        }
+                        disabled={isTyping}
+                        className="w-full rounded-full border border-[#e2c9a5] bg-white py-2.5 pl-4 pr-10 text-sm text-[#2b190f] placeholder:text-[#b08a6f] focus:border-[#c47f3b] focus:outline-none focus:ring-2 focus:ring-[#f0cf9e]"
+                      />
+                      <button
+                        onClick={handleSendMessage}
+                        disabled={isTyping || !chatInput.trim()}
+                        className="absolute right-1.5 top-1.5 flex h-7 w-7 items-center justify-center rounded-full bg-[#c47f3b] text-white shadow-sm disabled:cursor-not-allowed disabled:bg-[#e2c9a5]"
+                      >
+                        <Send className="h-3.5 w-3.5" />
+                      </button>
                     </div>
-                )}
+                  </div>
+                </div>
+              )}
 
+              {activeTab === Tab.COMMENTS && (
+                <div className="space-y-4">
+                  {philosopher.comments.length === 0 ? (
+                    <p className="text-sm text-[#8a674f]">
+                      还没有评论，写下你的想法吧。
+                    </p>
+                  ) : (
+                    <div className="space-y-3">
+                      {philosopher.comments.map((comment) => (
+                        <div
+                          key={comment.id}
+                          className="rounded-xl bg-[#fffaf0] px-3 py-2"
+                        >
+                          <div className="mb-1 flex items-center justify-between text-xs text-[#8a674f]">
+                            <span className="inline-flex items-center gap-1">
+                              <User className="h-3 w-3" />
+                              {comment.author}
+                            </span>
+                            <span>
+                              {new Date(
+                                comment.timestamp
+                              ).toLocaleDateString()}
+                            </span>
+                          </div>
+                          <p className="text-sm text-[#3b2418]">
+                            {comment.text}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <form onSubmit={handleCommentSubmit} className="space-y-2">
+                    <h4 className="text-xs font-semibold uppercase tracking-[0.16em] text-[#b08a6f]">
+                      Add a Comment
+                    </h4>
+                    <input
+                      type="text"
+                      placeholder="你的名字"
+                      value={authorName}
+                      onChange={(e) => setAuthorName(e.target.value)}
+                      className="w-full rounded-full border border-[#e2c9a5] bg-white px-3 py-2 text-sm text-[#2b190f] placeholder:text-[#b08a6f] focus:border-[#c47f3b] focus:outline-none focus:ring-2 focus:ring-[#f0cf9e]"
+                      required
+                    />
+                    <textarea
+                      placeholder="写下你的想法、感受或问题…"
+                      value={newComment}
+                      onChange={(e) => setNewComment(e.target.value)}
+                      className="h-20 w-full rounded-2xl border border-[#e2c9a5] bg-white px-3 py-2 text-sm text-[#2b190f] placeholder:text-[#b08a6f] focus:border-[#c47f3b] focus:outline-none focus:ring-2 focus:ring-[#f0cf9e]"
+                      required
+                    />
+                    <button
+                      type="submit"
+                      className="w-full rounded-full bg-[#c47f3b] py-2 text-sm font-medium text-white shadow-sm hover:bg-[#b56f2f]"
+                    >
+                      Post Comment
+                    </button>
+                  </form>
+                </div>
+              )}
             </div>
+          </div>
         </div>
       </div>
     </div>
